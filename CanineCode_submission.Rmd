@@ -1,0 +1,1863 @@
+---
+title: "CanineCode_submission"
+output: html_document
+---
+
+```{r}
+##### PACKAGES
+require(tidyverse)
+require(geomorph)
+require(Morpho)
+require(ggplot2)
+require(reshape2)
+require(plyr)
+require(car)
+require(scatterplot3d)
+require(rgl)
+require(animation)
+require(geiger)
+require(ape)
+require(nlme)
+require(phytools)
+require(grid)
+require(gridExtra)
+require(RRPP)
+```
+
+```{r}
+##### COLOURS AND SHAPES
+Shapes <- c(16,17)
+
+FamilyColours <- c("#935D34", "#14B8F2", "#036D20", "#A421F9", "#EC1C24", "#EF03FC", "#F48020", "#000000", "#0361F7", "#FDE500", "#56D856", "#EC268E", "#BCBCBC")
+
+KillColours <- c("#4876F7", "#F9A21B", "#8C63DB", "#B8EF60", "#A57548", "#FC5230", "#F291DD", "grey", "black")
+
+DietColours <- c("#393E41", "#FE64A3", "#82DDF0", "#C3D350", "#930C3D", "#E94F37", "#4C9E70", "grey")
+```
+
+```{r}
+#### IMPORTING THE TWO TREES ####
+
+## PLACENTALS
+Placentals <- read.nexus(file = "PlacentalCarnivores.nex")
+BestPlacentals <- Placentals$carnivoreST_bestEstimate
+
+plotTree(BestPlacentals)
+nodelabels()
+
+## MARSUPIALS
+Marsupials <- read.nexus(file = "MarsupialsTree.txt")
+plotTree(Marsupials)
+nodelabels()
+
+```
+
+```{r}
+#### MAKING A COMPOSITE TREE ####
+## PLOTTING PLACENTALS TREE
+plot.phylo(BestPlacentals)
+tiplabels()
+nodelabels()
+## PLOTTING MARSUPIALS TREE
+plot.phylo(Marsupials)
+tiplabels()
+nodelabels()
+
+## EDITING ROOT EDGES SO THAT THEY ARE EXTENDED TO 130 MILLION YEARS
+Marsupials$root.edge <- 83.1
+BestPlacentals$root.edge <-55
+
+## BINDING TREES TOGETHER
+NewTree <- bind.tree(BestPlacentals, Marsupials, position = 55, interactive = FALSE)
+plot.phylo(NewTree)
+axis(1)
+
+## PLOTTING NEW TREE
+plot.phylo(NewTree)
+nodelabels()
+axis(1)
+
+NewTree$tip.label
+
+### FINAL TREE FILES
+write.tree(NewTree, "NewTree.tre")
+
+```
+
+```{r}
+#### GEOMORPH
+
+#### IMPORTING DATA 3DGM DATA ------> ALL TEETH
+### DATA
+## Import morphologika text file
+can.mk <- read.morphologika("Morphologika.Coord.file.txt")
+
+## Copy (Import) wireframe/link file
+can.wire <- can.mk$wireframe
+
+## Copy labels to dataframe
+can.labels <- as.data.frame(can.mk$labels)
+
+## Change the Length to a numeric value
+can.labels$LengthNumeric <- as.numeric(paste(can.labels$Length))
+
+## Copy coordinates to new object
+can.coords <- can.mk$coords
+
+### MESH
+## Import mesh that sits most central in the PCA from Morphologika
+Dingo.mesh <- read.ply('Canis_dingo-NMVC22588-URCmirrored.ply')
+
+### SLIDING FILE
+## Import sliding semilandmarks file
+sliding <- as.matrix(read.csv("Slidingfile.csv", header = FALSE, sep = ",", dec = "."))
+
+```
+
+```{r}
+#### GPA, OUTLIERS, MEAN SHAPE, COORDS
+
+### GPA OF COORDS
+can.gpa.slide <- gpagen(can.coords, curves = sliding, PrinAxes = FALSE)
+## check
+plotAllSpecimens(can.gpa.slide$coords)
+
+## Plotting landmarks and wireframe
+plotAllSpecimens(can.gpa.slide$coords, mean = TRUE, links = can.wire, plot.param = list(pt.bg = "blue", pt.cex = 0.2, link.col = "black"))
+
+### MEAN SHAPE
+## Calculate mean landmark configuration for sample
+can.mshape.slide <- mshape(can.gpa.slide$coords)
+
+## plots a map of the coordinates in order
+plot(can.mshape.slide)
+
+```
+
+```{r}
+#### TANGENT SPACE
+### what do they look like?
+can.slide.TS <- gm.prcomp(can.gpa.slide$coords)
+
+### PLOTTING TS WITH NO MESH
+plot(can.slide.TS)
+
+### EXTRACTING PC SCORES
+## new object that takes the PCscores out of the plotTangentSopace so we can ployt them
+can.slide.pcs <- as.data.frame(can.slide.TS$x)
+
+```
+
+```{r}
+#### CALCULATING SPECIES MEANS -----> for both upper and lower coords
+
+### NEW FACTOR/LABEL 
+## Species+Tooth - this will be out identifier
+can.labels$SpeciesTooth <- paste(can.labels$Species, can.labels$Tooth, sep = ".")
+
+### SUBSET COORDS
+## new object where we have taken the coordinates of the gpa and grouped them according to species
+SpeciesTooth.coords <- coords.subset(A = can.gpa.slide$coords, group = can.labels$SpeciesTooth)
+## calculating the mean shape for the new object from above
+SpeciesToothMeans.coords <- sapply(SpeciesTooth.coords, mshape, simplify = "array")
+
+### TANGENT SPACE AND PCS
+SpeciesToothMeans.TS <- gm.prcomp(SpeciesToothMeans.coords)
+
+### RELABELING
+## matching the pc scores to the old label data
+can.labels$rand <- runif(n = 203)
+can.species.labels <- recast(can.labels, Species + Family + Suborder + Tooth + Diet + Killing ~ variable, measure.var = 'LengthNumeric', mean, na.rm = TRUE)
+
+### EXTRACTING PC SCORES
+## new oject that takes the PCscores out of the plotTangentSopace so we can plot them
+SpeciesToothMeans.pcs <- as.data.frame(SpeciesToothMeans.TS$x)
+
+# THESE SPECIES MEAN PC SCORES WILL BE EXTRACTED AN INPUT INTO A NEW EXCEL DATAFRAMES FOR SUBSEQUENT ANALYSES, some including all species and some that only include species with either diet or killing information avaialble
+
+## FILE NAMES: 
+# 'UpperCanineMeans' - all data
+# 'LowerCanineMeans' - all data
+# 'UpperCanines.dietdata' - diet data
+# 'LowerCanines.dietdata' - diet data
+# 'UpperCanines.killdata' - kill data
+# 'LowerCanines.killdata' - kill data
+
+```
+
+```{r}
+#### IMPORTING RAW DATA FILE
+
+Canines <- read.csv("Master.Data.csv")
+Canines
+
+# subsetting out all canines with good edges
+Canines <- subset(Canines,subset=Canines$Outlier =='Y')
+# subsetting out all canines with good edges and a pair
+Both_Canines <- subset(Canines,subset=Canines$Sharpness.pair =='Y')
+# subsetting out all upper canines
+Upper_Canines <- subset(Canines, subset = Canines$Tooth =='Upper')
+# subsetting out all lower canines
+Lower_Canines <- subset(Canines, subset = Canines$Tooth =='Lower')
+
+```
+
+```{r}
+###### CALCULATING SPECIES MEANS FOR RAW NON COORDINATE DATA
+
+### UPPERS ONLY ------> EDGES, TIPS, LENGTHS, CSIZE, BODY SIZE
+# RECASTING THE DATA SET
+Upper_Canines_SpMeans <- recast(Upper_Canines, 
+      Species + Suborder + Family + Tooth + Killing.technique + Diet ~ variable, 
+      measure.var = c("Anterior", "Posterior", "Lingual", "Labial", "Tip.Av", "Midline.length", "log.Midline.length", "Csize", "Body.mass"), mean, na.rm = TRUE)
+
+Upper_Canines_SpMeans
+
+names(Upper_Canines_SpMeans)[names(Upper_Canines_SpMeans)=="Anterior"] <- "Anterior.SpMean"
+names(Upper_Canines_SpMeans)[names(Upper_Canines_SpMeans)=="Posterior"] <- "Posterior.SpMean"
+names(Upper_Canines_SpMeans)[names(Upper_Canines_SpMeans)=="Lingual"] <- "Lingual.SpMean"
+names(Upper_Canines_SpMeans)[names(Upper_Canines_SpMeans)=="Labial"] <- "Labial.SpMean"
+names(Upper_Canines_SpMeans)[names(Upper_Canines_SpMeans)=="Tip.Av"] <- "Tip.Av.SpMean"
+names(Upper_Canines_SpMeans)[names(Upper_Canines_SpMeans)=="Midline.length."] <- "Midline.length."
+names(Upper_Canines_SpMeans)[names(Upper_Canines_SpMeans)=="log.Midline.length"] <- "log.Midline.length"
+names(Upper_Canines_SpMeans)[names(Upper_Canines_SpMeans)=="Csize"] <- "Csize"
+names(Upper_Canines_SpMeans)[names(Upper_Canines_SpMeans)=="Body.mass"] <- "Body.mass"
+
+Upper_Canines_SpMeans
+
+### LOWERS ONLY ------> EDGES, TIPS, LENGTHS, CSIZE, BODY SIZE
+# RECASTING THE DATA SET
+Lower_Canines_SpMeans <- recast(Lower_Canines, 
+      Species + Suborder + Family + Tooth + Killing.technique + Diet ~ variable, 
+      measure.var = c("Anterior", "Posterior", "Lingual", "Labial", "Tip.Av", "Midline.length", "log.Midline.length", "Csize", "Body.mass"), mean, na.rm = TRUE)
+
+Lower_Canines_SpMeans
+
+names(Lower_Canines_SpMeans)[names(Lower_Canines_SpMeans)=="Anterior"] <- "Anterior.SpMean"
+names(Lower_Canines_SpMeans)[names(Lower_Canines_SpMeans)=="Posterior"] <- "Posterior.SpMean"
+names(Lower_Canines_SpMeans)[names(Lower_Canines_SpMeans)=="Lingual"] <- "Lingual.SpMean"
+names(Lower_Canines_SpMeans)[names(Lower_Canines_SpMeans)=="Labial"] <- "Labial.SpMean"
+names(Lower_Canines_SpMeans)[names(Lower_Canines_SpMeans)=="Tip.Av"] <- "Tip.Av.SpMean"
+names(Lower_Canines_SpMeans)[names(Lower_Canines_SpMeans)=="Midline.length."] <- "Midline.length."
+names(Lower_Canines_SpMeans)[names(Lower_Canines_SpMeans)=="log.Midline.length"] <- "log.Midline.length"
+names(Lower_Canines_SpMeans)[names(Lower_Canines_SpMeans)=="Csize"] <- "Csize"
+names(Lower_Canines_SpMeans)[names(Lower_Canines_SpMeans)=="Body.mass"] <- "Body.mass"
+
+Lower_Canines_SpMeans
+
+### USE THESE NEW SPECIES MEANS TO MAKE A NEW EXCEL DATAFRAMES FOR SUBSEQUENT ANALYSES, some including all species and some that only include species with either diet or killing information avaialble
+
+## FILE NAMES: 
+# 'UpperCanineMeans' - all data
+# 'LowerCanineMeans' - all data
+# 'UpperCanines.dietdata' - diet data
+# 'LowerCanines.dietdata' - diet data
+# 'UpperCanines.killdata' - kill data
+# 'LowerCanines.killdata' - kill data
+
+```
+
+```{r}
+#### TRIMMING TREE FOR UPPER CANINES BASED ON DATA FILE ---------> ALL SPECIES
+## IMPORT SUBSETTED FILE
+UpperCanineMeans <- read.csv(file = "UpperCanineMeans.csv", header=TRUE, row.names=1, stringsAsFactors = F)
+
+## TREE ----> 
+# matches dataframe species to phylogeny
+UpperCanines.plusTree <- treedata(NewTree, UpperCanineMeans) 
+
+str(UpperCanines.plusTree)
+# adds back in phy
+UpperCanines.finalTree <- UpperCanines.plusTree$phy
+# makes a new dataframe
+UpperCanines.finalData <- data.frame(UpperCanines.plusTree$data)
+
+plot.phylo(UpperCanines.finalTree)
+
+## RELABELLING
+# relabeling terms so we can differentiate better
+AnteriorUpper<- UpperCanines.finalData$Anterior.SpMean
+PosteriorUpper<- UpperCanines.finalData$Posterior.SpMean
+LingualUpper<- UpperCanines.finalData$Lingual.SpMean
+LabialUpper<- UpperCanines.finalData$Labial.SpMean
+Tip.AvUpper<- UpperCanines.finalData$Tip.Av.SpMean
+PC1Upper<- UpperCanines.finalData$GMSpM.PC1
+PC2Upper<- UpperCanines.finalData$GMSpM.PC2
+CsizeUpper<- UpperCanines.finalData$Csize.SpMean
+LengthUpper<- UpperCanines.finalData$Midline.length.SpMean
+logLengthUpper<- UpperCanines.finalData$log.Midline.length.SpMean
+Body.massUpper<- UpperCanines.finalData$Body.massSpMean
+logBody.massUpper<- UpperCanines.finalData$logBody.mass
+
+# relabeling
+names(AnteriorUpper)<-row.names(UpperCanines.finalData)
+names(PosteriorUpper)<-row.names(UpperCanines.finalData)
+names(LingualUpper)<-row.names(UpperCanines.finalData)
+names(LabialUpper)<-row.names(UpperCanines.finalData)
+names(Tip.AvUpper)<-row.names(UpperCanines.finalData)
+names(PC1Upper)<-row.names(UpperCanines.finalData)
+names(PC2Upper)<-row.names(UpperCanines.finalData)
+names(CsizeUpper)<-row.names(UpperCanines.finalData)
+names(LengthUpper)<-row.names(UpperCanines.finalData)
+names(logLengthUpper)<-row.names(UpperCanines.finalData)
+names(Body.massUpper)<-row.names(UpperCanines.finalData)
+names(logBody.massUpper)<-row.names(UpperCanines.finalData)
+
+```
+
+```{r}
+#### TRIMMING TREE FOR LOWER CANINES BASED ON DATA FILE --------> ALL SPECIES
+## IMPORT SUBSETTED FILE
+LowerCanineMeans <- read.csv(file = "LowerCanineMeans.csv", header=TRUE,row.names=1,stringsAsFactors = F)
+
+## TREE ----> 
+# matches dataframe species to phylogeny
+LowerCanines.plusTree <- treedata(NewTree, LowerCanineMeans) 
+# adds back in phy
+LowerCanines.finalTree <- LowerCanines.plusTree$phy
+# makes a new dataframe
+LowerCanines.finalData <- data.frame(LowerCanines.plusTree$data)
+
+## RELABELLING
+# relabeling terms so we can differentiate better
+AnteriorLower<- LowerCanines.finalData$Anterior.SpMean
+PosteriorLower<- LowerCanines.finalData$Posterior.SpMean
+LingualLower<- LowerCanines.finalData$Lingual.SpMean
+LabialLower<- LowerCanines.finalData$Labial.SpMean
+Tip.AvLower<- LowerCanines.finalData$Tip.Av.SpMean
+PC1Lower<- LowerCanines.finalData$GMSpM.PC1
+PC2Lower<- LowerCanines.finalData$GMSpM.PC2
+CsizeLower<- LowerCanines.finalData$Csize.SpMean
+LengthLower<- LowerCanines.finalData$Midline.length
+log.LengthLower<- LowerCanines.finalData$log.Midline.length
+BodyMass.Lower<- LowerCanines.finalData$Body.mass
+log.BodyMass.Lower<- LowerCanines.finalData$logBody.mass
+
+
+names(AnteriorLower)<-row.names(LowerCanines.finalData)
+names(PosteriorLower)<-row.names(LowerCanines.finalData)
+names(LingualLower)<-row.names(LowerCanines.finalData)
+names(LabialLower)<-row.names(LowerCanines.finalData)
+names(Tip.AvLower)<-row.names(LowerCanines.finalData)
+names(PC1Lower)<-row.names(LowerCanines.finalData)
+names(PC2Lower)<-row.names(LowerCanines.finalData)
+names(CsizeLower)<-row.names(LowerCanines.finalData)
+names(LengthLower)<-row.names(LowerCanines.finalData)
+names(log.LengthLower)<-row.names(LowerCanines.finalData)
+names(BodyMass.Lower)<-row.names(LowerCanines.finalData)
+names(log.BodyMass.Lower)<-row.names(LowerCanines.finalData)
+
+```
+
+
+```{r}
+#### 3DGM AND PHYSIGNAL
+
+#### SUBSETTING OUT UPPER AND LOWER CANINE COORDS FIRST THEN MATCHING TO DATASET IN THE TREES (UPPER OR LOWER), THEN CALCULATING PHYSIGNAL
+
+### NEW FACTOR/LABEL 
+## Species+Tooth - this will be out identifier
+can.labels$SpeciesTooth <- paste(can.labels$Species, can.labels$Tooth, sep = ".")
+### NEED TO SUBSET TO UPPERS AND LOWERS FIRST
+### SUBSET COORDS
+## new object where we have taken the coordinates of the SPECIES MEANS and grouped them according to TOOTH
+GroupSpeciesTooth.coords <- coords.subset(A = SpeciesToothMeans.coords, group = can.species.labels$Tooth)
+str(GroupSpeciesTooth.coords)
+dimnames(SpeciesToothMeans.coords)[3]
+
+## UPPERS
+Upper.coords <- GroupSpeciesTooth.coords$Upper
+str(Upper.coords)
+
+## LOWERS
+Lower.coords <- GroupSpeciesTooth.coords$Lower
+str(Lower.coords)
+
+#### LIST OF SPECIES IN THE FINAL DATA --------> UPPERS
+# SUBSETING OUT THE UPPERS FROM OUR can.species.labels
+can.species.labels.upper <- can.species.labels[can.species.labels$Tooth == "Upper",]
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN can.specie.labels
+dimnames(Upper.coords)[3] <- list(as.vector(can.species.labels.upper$Species))
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN UpperCanines.finalData
+UpperCanineList <- rownames(UpperCanines.finalData)
+str(UpperCanineList)
+# MATCHING OUR CANINE LIST TO OUR COORDS LIST
+Upper.coords.sub <- Upper.coords[,,UpperCanineList]
+str(Upper.coords.sub)
+### CALCULATING PHYSIGNAL
+physignal(Upper.coords.sub, UpperCanines.finalTree, iter = 999)
+PhySigUpper <- physignal(Upper.coords.sub, UpperCanines.finalTree, iter = 999)
+
+plot(PhySigUpper)
+
+
+#### LIST OF SPECIES IN THE FINAL DATA --------> LOWERS
+# SUBSETING OUT THE UPPERS FROM OUR can.species.labels
+can.species.labels.lower <- can.species.labels[can.species.labels$Tooth == "Lower",]
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN can.specie.labels
+dimnames(Lower.coords)[3] <- list(as.vector(can.species.labels.lower$Species))
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN UpperCanines.finalData
+LowerCanineList <- rownames(LowerCanines.finalData)
+str(LowerCanineList)
+# MATCHING OUR CANINE LIST TO OUR COORDS LIST
+Lower.coords.sub <- Lower.coords[,,LowerCanineList]
+### CALCULATING PHYSIGNAL
+physignal(Lower.coords.sub, LowerCanines.finalTree, iter = 999)
+PhySigLower <- physignal(Lower.coords.sub, LowerCanines.finalTree, iter = 999)
+plot(PhySigLower)
+
+#### Kmult < 1 indicates that sister species are more different than what would be expected under Brownian model, and so, besides the phylogeny there are other variables that need to be considered
+```
+
+```{r}
+#### TRIMMING TREE FOR UPPER CANINES BASED ON DATA FILE -----> SPECIES THAT WE HAVE DIET INFO FOR
+## IMPORT SUBSETTED FILE
+UpperCanines.dietmeans <- read.csv(file = "UpperCanines.dietdata.csv", header=TRUE, row.names=1, stringsAsFactors = F)
+
+## TREE ----> 
+# matches dataframe species to phylogeny
+UpperCanines.diet.plusTree <- treedata(NewTree, UpperCanines.dietmeans)
+# adds back in phy
+UpperCanines.diet.finalTree <- UpperCanines.diet.plusTree$phy
+# makes a new dataframe
+UpperCanines.diet.finalData <- data.frame(UpperCanines.diet.plusTree$data)
+
+## RELABELLING
+# relabeling terms so we can differentiate better
+diet.AnteriorUpper<- UpperCanines.finalData$Anterior.SpMean
+diet.PosteriorUpper<- UpperCanines.finalData$Posterior.SpMean
+diet.LingualUpper<- UpperCanines.finalData$Lingual.SpMean
+diet.LabialUpper<- UpperCanines.finalData$Labial.SpMean
+diet.Tip.AvUpper<- UpperCanines.finalData$Tip.Av.SpMean
+diet.PC1Upper<- UpperCanines.finalData$GMSpM.PC1
+diet.PC2Upper<- UpperCanines.finalData$GMSpM.PC2
+
+
+# relabeling
+names(diet.AnteriorUpper)<-row.names(UpperCanines.finalData)
+names(diet.PosteriorUpper)<-row.names(UpperCanines.finalData)
+names(diet.LingualUpper)<-row.names(UpperCanines.finalData)
+names(diet.LabialUpper)<-row.names(UpperCanines.finalData)
+names(diet.Tip.AvUpper)<-row.names(UpperCanines.finalData)
+names(diet.PC1Upper)<-row.names(UpperCanines.finalData)
+names(diet.PC2Upper)<-row.names(UpperCanines.finalData)
+
+```
+
+```{r}
+#### TRIMMING TREE FOR UPPER CANINES BASED ON DATA FILE ------> SPECIES THAT WE HAVE DIET INFO FOR
+## IMPORT SUBSETTED FILE
+LowerCanines.dietmeans <- read.csv(file = "LowerCanines.dietdata.csv", header=TRUE, row.names=1, stringsAsFactors = F)
+
+## TREE ----> 
+# matches dataframe species to phylogeny
+LowerCanines.diet.plusTree <- treedata(NewTree, LowerCanines.dietmeans)
+# adds back in phy
+LowerCanines.diet.finalTree <- LowerCanines.diet.plusTree$phy
+# makes a new dataframe
+LowerCanines.diet.finalData <- data.frame(LowerCanines.diet.plusTree$data)
+
+## RELABELLING
+# relabeling terms so we can differentiate better
+diet.AnteriorLower<- LowerCanines.finalData$Anterior.SpMean
+diet.PosteriorLower<- LowerCanines.finalData$Posterior.SpMean
+diet.LingualLower<- LowerCanines.finalData$Lingual.SpMean
+diet.LabialLower<- LowerCanines.finalData$Labial.SpMean
+diet.Tip.AvLower<- LowerCanines.finalData$Tip.Av.SpMean
+diet.PC1Lower<- LowerCanines.finalData$GMSpM.PC1
+diet.PC2Lower<- LowerCanines.finalData$GMSpM.PC2
+
+
+# relabeling
+names(diet.AnteriorLower)<-row.names(LowerCanines.finalData)
+names(diet.PosteriorLower)<-row.names(LowerCanines.finalData)
+names(diet.LingualLower)<-row.names(LowerCanines.finalData)
+names(diet.LabialLower)<-row.names(LowerCanines.finalData)
+names(diet.Tip.AvLower)<-row.names(LowerCanines.finalData)
+names(diet.PC1Lower)<-row.names(LowerCanines.finalData)
+names(diet.PC2Lower)<-row.names(LowerCanines.finalData)
+
+```
+
+```{r}
+#### TRIMMING TREE FOR UPPER CANINES BASED ON DATA FILE -------> SPECIES THAT WE HAVE KILLING INFO FOR
+## IMPORT SUBSETTED FILE
+UpperCanines.killmeans <- read.csv(file = "UpperCanines.killdata.csv", header=TRUE, row.names=1, stringsAsFactors = F)
+
+## TREE ----> 
+# matches dataframe species to phylogeny
+UpperCanines.kill.plusTree <- treedata(NewTree, UpperCanines.killmeans)
+# adds back in phy
+UpperCanines.kill.finalTree <- UpperCanines.kill.plusTree$phy
+# makes a new dataframe
+UpperCanines.kill.finalData <- data.frame(UpperCanines.kill.plusTree$data)
+
+## RELABELLING
+# relabeling terms so we can differentiate better
+kill.AnteriorUpper<- UpperCanines.finalData$Anterior.SpMean
+kill.PosteriorUpper<- UpperCanines.finalData$Posterior.SpMean
+kill.LingualUpper<- UpperCanines.finalData$Lingual.SpMean
+kill.LabialUpper<- UpperCanines.finalData$Labial.SpMean
+kill.Tip.AvUpper<- UpperCanines.finalData$Tip.Av.SpMean
+kill.PC1Upper<- UpperCanines.finalData$GMSpM.PC1
+kill.PC2Upper<- UpperCanines.finalData$GMSpM.PC2
+
+
+# relabeling
+names(kill.AnteriorUpper)<-row.names(UpperCanines.finalData)
+names(kill.PosteriorUpper)<-row.names(UpperCanines.finalData)
+names(kill.LingualUpper)<-row.names(UpperCanines.finalData)
+names(kill.LabialUpper)<-row.names(UpperCanines.finalData)
+names(kill.Tip.AvUpper)<-row.names(UpperCanines.finalData)
+names(kill.PC1Upper)<-row.names(UpperCanines.finalData)
+names(kill.PC2Upper)<-row.names(UpperCanines.finalData)
+
+```
+
+```{r}
+#### TRIMMING TREE FOR UPPER CANINES BASED ON DATA FILE ---------> SPECIES THAT WE HAVE KILLING INFO FOR
+## IMPORT SUBSETTED FILE
+LowerCanines.killmeans <- read.csv(file = "LowerCanines.killdata.csv", header=TRUE, row.names=1, stringsAsFactors = F)
+
+## TREE ----> 
+# matches dataframe species to phylogeny
+LowerCanines.kill.plusTree <- treedata(NewTree, LowerCanines.killmeans)
+# adds back in phy
+LowerCanines.kill.finalTree <- LowerCanines.kill.plusTree$phy
+# makes a new dataframe
+LowerCanines.kill.finalData <- data.frame(LowerCanines.kill.plusTree$data)
+
+## RELABELLING
+# relabeling terms so we can differentiate better
+kill.AnteriorLower<- LowerCanines.finalData$Anterior.SpMean
+kill.PosteriorLower<- LowerCanines.finalData$Posterior.SpMean
+kill.LingualLower<- LowerCanines.finalData$Lingual.SpMean
+kill.LabialLower<- LowerCanines.finalData$Labial.SpMean
+kill.Tip.AvLower<- LowerCanines.finalData$Tip.Av.SpMean
+kill.PC1Lower<- LowerCanines.finalData$GMSpM.PC1
+kill.PC2Lower<- LowerCanines.finalData$GMSpM.PC2
+
+
+# relabeling
+names(kill.AnteriorLower)<-row.names(LowerCanines.finalData)
+names(kill.PosteriorLower)<-row.names(LowerCanines.finalData)
+names(kill.LingualLower)<-row.names(LowerCanines.finalData)
+names(kill.LabialLower)<-row.names(LowerCanines.finalData)
+names(kill.Tip.AvLower)<-row.names(LowerCanines.finalData)
+names(kill.PC1Lower)<-row.names(LowerCanines.finalData)
+names(kill.PC2Lower)<-row.names(LowerCanines.finalData)
+
+```
+
+```{r}
+#### 3DGM SUBSETTING FOR SIGNIFICANCE TESTING
+
+# UPPERS for DIET, I am subsetting the coordinate data based on diet info
+# SUBSETING OUT THE UPPERS FROM OUR can.species.labels
+can.species.labels.upper <- can.species.labels[can.species.labels$Tooth == "Upper",]
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN can.specie.labels
+dimnames(Upper.coords)[3] <- list(as.vector(can.species.labels.upper$Species))
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN UpperCanines.finalData
+UpperCanineList.diet <- rownames(UpperCanines.diet.finalData)
+str(UpperCanineList.diet)
+# MATCHING OUR CANINE LIST TO OUR COORDS LIST
+Upper.coords.sub.diet <- Upper.coords[,,UpperCanineList.diet]
+str(Upper.coords.sub.diet)
+
+# UPPERS for KILLING, I am subsetting the coordinate data based on killing info
+# SUBSETING OUT THE UPPERS FROM OUR can.species.labels
+can.species.labels.upper <- can.species.labels[can.species.labels$Tooth == "Upper",]
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN can.specie.labels
+dimnames(Upper.coords)[3] <- list(as.vector(can.species.labels.upper$Species))
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN UpperCanines.finalData
+UpperCanineList.kill <- rownames(UpperCanines.kill.finalData)
+str(UpperCanineList.kill)
+# MATCHING OUR CANINE LIST TO OUR COORDS LIST
+Upper.coords.sub.kill <- Upper.coords[,,UpperCanineList.kill]
+str(Upper.coords.sub.kill)
+
+
+# LOWERS for DIET, I am subsetting the coordinate data based on diet info
+# SUBSETING OUT THE UPPERS FROM OUR can.species.labels
+can.species.labels.lower <- can.species.labels[can.species.labels$Tooth == "Lower",]
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN can.specie.labels
+dimnames(Lower.coords)[3] <- list(as.vector(can.species.labels.lower$Species))
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN UpperCanines.finalData
+LowerCanineList.diet <- rownames(LowerCanines.diet.finalData)
+str(LowerCanineList.diet)
+# MATCHING OUR CANINE LIST TO OUR COORDS LIST
+Lower.coords.sub.diet <- Lower.coords[,,LowerCanineList.diet]
+str(Lower.coords.sub.diet)
+
+# LOWERS for KILLING, I am subsetting the coordinate data based on killing info
+# SUBSETING OUT THE UPPERS FROM OUR can.species.labels
+can.species.labels.lower <- can.species.labels[can.species.labels$Tooth == "Lower",]
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN can.specie.labels
+dimnames(Lower.coords)[3] <- list(as.vector(can.species.labels.lower$Species))
+# MAKING A 'LIST' OBJECT FROM THE LIST OF SPECIES IN UpperCanines.finalData
+LowerCanineList.kill <- rownames(LowerCanines.kill.finalData)
+str(LowerCanineList.kill)
+# MATCHING OUR CANINE LIST TO OUR COORDS LIST
+Lower.coords.sub.kill <- Lower.coords[,,LowerCanineList.kill]
+str(Lower.coords.sub.kill)
+
+```
+
+```{r}
+### READING IN THE LABELS IN PREPARATION FOR LM.RRPP ANALYSES
+UpperCanines.dietlabels <- read.csv("UpperCanines.dietlabels.csv")
+LowerCanines.dietlabels <- read.csv("LowerCanines.dietlabels.csv")
+```
+
+```{r}
+### CREATE THE VARIANCE COVARIANCE MATRIX (COV =) IN PREPARATION FOR LM.RRPP ANALYSES
+diet.UpperCov <- vcv(UpperCanines.diet.finalTree)
+diet.LowerCov <- vcv(LowerCanines.diet.finalTree)
+```
+
+```{r}
+### READING IN THE LABELS IN PREPARATION FOR LM.RRPP ANALYSES
+UpperCanines.killlabels <- read.csv("UpperCanines.killlabels.csv")
+LowerCanines.killlabels <- read.csv("LowerCanines.killlabels.csv")
+```
+
+```{r}
+### CREATE THE VARIANCE COVARIANCE MATRIX (COV =) IN PREPARATION FOR LM.RRPP ANALYSES
+kill.UpperCov <- vcv(UpperCanines.kill.finalTree)
+kill.LowerCov <- vcv(LowerCanines.kill.finalTree)
+```
+
+```{r}
+#### 3DGM AND ALLOMETRY
+
+### UPPERS
+### ProcD.PGLS allometry -----> CSIZE MEASURE OF SIZE
+# SHAPE ~ SIZE
+AllometryPGLS.uppers.csize <- procD.pgls(Upper.coords.sub ~ log10(UpperCanines.finalData$Csize.SpMean), phy = UpperCanines.finalTree, iter=999)
+summary(AllometryPGLS.uppers.csize)
+# SHAPE ~ SIZE + DIET
+AllometryPGLS.uppers.csize.diet <- procD.pgls(Upper.coords.sub.diet ~ log10(UpperCanines.diet.finalData$Csize) + UpperCanines.dietlabels$Diet, phy = UpperCanines.diet.finalTree, iter=999)
+summary(AllometryPGLS.uppers.csize.diet)
+# SHAPE ~ SIZE + KILLING
+AllometryPGLS.uppers.csize.kill <- procD.pgls(Upper.coords.sub.kill ~ log10(UpperCanines.kill.finalData$Csize) + UpperCanines.killlabels$Killing.technique, phy = UpperCanines.kill.finalTree, iter=999)
+summary(AllometryPGLS.uppers.csize.kill)
+
+### LOWERS
+### ProcD.PGLS allometry ------> CSIZE MEASURE OF SIZE
+# SHAPE ~ SIZE
+AllometryPGLS.lowers.csize <- procD.pgls(Lower.coords.sub ~ log10(LowerCanines.finalData$Csize.SpMean), phy = LowerCanines.finalTree, iter=999)
+summary(AllometryPGLS.lowers.csize)
+# SHAPE ~ SIZE + DIET
+AllometryPGLS.lowers.csize.diet <- procD.pgls(Lower.coords.sub.diet ~ log10(LowerCanines.diet.finalData$Csize) + LowerCanines.dietlabels$Diet, phy = LowerCanines.diet.finalTree, iter=999)
+summary(AllometryPGLS.lowers.csize.diet)
+# SHAPE ~ SIZE + KILLING
+AllometryPGLS.lowers.csize.kill <- procD.pgls(Lower.coords.sub.kill ~ log10(LowerCanines.kill.finalData$Csize) + LowerCanines.killlabels$Killing.technique, phy = LowerCanines.kill.finalTree, iter=999)
+summary(AllometryPGLS.lowers.csize.kill)
+
+```
+
+```{r}
+### SIGNIFICANCE TESTING OF 3DGM DATA VIA PGLS -----> DOES CANINE SHAPE (CANINE COORDS FROM 3DGM) CORRELATE WITH DIET OR KILLING?
+
+#### UPPERS
+### PGLS 
+# SHAPE ~ DIET
+PGLS.uppers.diet <- procD.pgls(Upper.coords.sub.diet ~ UpperCanines.dietlabels$Diet, phy = UpperCanines.diet.finalTree, iter=999)
+summary(PGLS.uppers.diet)
+### PGLS
+# SHAPE ~ KILLING
+PGLS.uppers.kill <- procD.pgls(Upper.coords.sub.kill ~ UpperCanines.killlabels$Killing.technique, phy = UpperCanines.kill.finalTree, iter=999)
+summary(PGLS.uppers.kill)
+
+#### LOWERS
+### PGLS
+# SHAPE ~ DIET
+PGLS.lowers.diet <- procD.pgls(Lower.coords.sub.diet ~ LowerCanines.dietlabels$Diet, phy = LowerCanines.diet.finalTree, iter=999)
+summary(PGLS.lowers.diet)
+### PGLS
+# SHAPE ~ KILLING
+PGLS.lowers.kill <- procD.pgls(Lower.coords.sub.kill ~ LowerCanines.killlabels$Killing.technique, phy = LowerCanines.kill.finalTree, iter=999)
+summary(PGLS.lowers.kill)
+
+```
+
+```{r}
+### PGLS REGRESSION OF log(CanineLength) ~ log(BodyMass) ----> 
+### UPPER CANINES
+
+### REGRESSIONS
+### UPPERS log(BODY MASS) vs log(LENGTH)
+# NORMAL
+Upper.RegressionloglogBodyMass <- lm(log.Midline.length.SpMean ~ logBody.massUpper, data = UpperCanines.finalData)
+summary(Upper.RegressionloglogBodyMass)
+plot(log.Midline.length.SpMean ~ logBody.massUpper, data = UpperCanines.finalData)
+abline(Upper.RegressionloglogBodyMass)
+plot(Upper.RegressionloglogBodyMass$residuals)
+
+# PGLS
+UPPER.pgls.loglogBodyMass.vs.Length <- gls(logLengthUpper ~ logBody.massUpper, correlation = corBrownian(phy = UpperCanines.finalTree), data = UpperCanines.finalData, method = "ML")
+summary(UPPER.pgls.loglogBodyMass.vs.Length)
+plot(UPPER.pgls.loglogBodyMass.vs.Length)
+
+# LOOK AT RESIDUALS
+plot(UPPER.pgls.loglogBodyMass.vs.Length$residuals)
+
+# MAKE RESUDUALS INTO NE DATA FRAME
+# Upper.Residuals <- as.data.frame(UPPER.pgls.loglogBodyMass.vs.Length$residuals)
+# ADD IN THE RESIDUALS TO THE TREE TRIMMED DATAFRAME ------ > this deletes the 'Species column identifier though
+#UpperCanineData <- cbind(UpperCanineData, loglogBodyMass.residual = Upper.Residuals$`UPPER.pgls.loglogBodyMass.vs.Length$residuals`)
+# SO YOU NEED TO GO IN AND EDIT THE NEW DATAFRAME FILE
+# write.csv(UpperCanineData, "UpperCanineData.csv")
+UpperCanineData <- read.csv("UpperCanineData.csv")
+
+UpperRegression <-ggplot(UpperCanineData, aes(x = logBody.mass, y = log.Midline.length.SpMean)) +
+    geom_abline(intercept = 0, slope = 1) +
+    geom_smooth(method = lm, colour = 'red') +
+    geom_point(size=3, aes(colour = factor(UpperCanineData$Family))) +
+    scale_colour_manual(name = "Family", values = FamilyColours) +
+    geom_text(size=2, aes(label = UpperCanineData$Species), hjust=-.2, vjust=.4) +
+    labs(title = "",
+            x = "log10(Body mass (g))",
+            y = "log10(Upper canine length (mm))") +
+     theme_classic() +
+   theme(legend.position = "none")
+
+UpperResiduals <- ggplot(UpperCanineData, aes(x = UpperCanineData$logBody.mass, y = UpperCanineData$loglogBodyMass.residual)) +
+  geom_point(size=3, aes(colour = factor(UpperCanineData$Family))) +
+  scale_colour_manual(name = "Family", values = FamilyColours) +
+  geom_text(size=3, aes(label = UpperCanineData$Species),hjust=0, vjust=0) +
+  labs(title="Residuals from PGLS log(Body mass (g)) vs. log(Length (upper canines))", 
+       subtitle="",
+       x="",
+       y="Residual value") +
+     theme_classic() +
+     theme(legend.position = "none")
+
+UpperLength.BodyMass.Analysis <- grid.arrange(UpperRegression, UpperResiduals, nrow = 1)
+
+```
+
+```{r}
+### PGLS REGRESSION OF log(CanineLength) ~ log(BodyMass) ----> 
+### LOWER CANINES
+
+### REGRESSIONS
+### UPPERS log(BODY MASS) vs log(LENGTH)
+# NORMAL
+Lower.RegressionloglogBodyMass <- lm(log.LengthLower ~ log.BodyMass.Lower, data = LowerCanines.finalData)
+summary(Lower.RegressionloglogBodyMass)
+plot(log.LengthLower ~ log.BodyMass.Lower, data = LowerCanines.finalData)
+abline(Lower.RegressionloglogBodyMass)
+plot(Lower.RegressionloglogBodyMass$residuals)
+
+# PGLS
+LOWER.pgls.loglogBodyMass.vs.Length <- gls(log.LengthLower ~ log.BodyMass.Lower, correlation = corBrownian(phy = LowerCanines.finalTree), data = LowerCanines.finalData, method = "ML")
+summary(LOWER.pgls.loglogBodyMass.vs.Length)
+plot(LOWER.pgls.loglogBodyMass.vs.Length)
+
+# LOOK AT RESIDUALS
+plot(LOWER.pgls.loglogBodyMass.vs.Length$residuals)
+
+# MAKE RESUDUALS INTO NE DATA FRAME
+#Lower.Residuals <- as.data.frame(LOWER.pgls.loglogBodyMass.vs.Length$residuals)
+# ADD IN THE RESIDUALS TO THE TREE TRIMMED DATAFRAME ------ > this deletes the 'Species column identifier though
+#LowerCanineData <- cbind(LowerCanines.finalData, loglogBodyMass.residual = Lower.Residuals$`LOWER.pgls.loglogBodyMass.vs.Length$residuals`)
+# SO YOU NEED TO GO IN AND EDIT THE NEW DATAFRAME FILE
+#write.csv(LowerCanineData, "LowerCanineData.csv")
+LowerCanineData <- read.csv("LowerCanineData.csv")
+
+LowerRegression <- ggplot(LowerCanineData, aes(x = log.BodyMass.Lower, y = log.Midline.length)) +
+    geom_abline(intercept = 0, slope = 1) +
+    geom_smooth(method = lm, colour = 'red') +
+    geom_point(size=3, aes(colour = factor(LowerCanineData$Family))) +
+    scale_colour_manual(name = "Family", values = FamilyColours) +
+    geom_text(size=2, aes(label = LowerCanineData$Species), hjust=-.2, vjust=.4) +
+    labs(title = "",
+            x = "log10(Body mass (g))",
+            y = "log10(Lower canine length (mm))") +
+     theme_classic() +
+   theme(legend.position = "none")
+
+LowerResiduals <- ggplot(LowerCanineData, aes(x = LowerCanineData$logBody.mass, y = LowerCanineData$loglogBodyMass.residual)) +
+  geom_point(size=3, aes(colour = factor(LowerCanineData$Family))) +
+  scale_colour_manual(name = "Family", values = FamilyColours) +
+  geom_text(size=3, aes(label = LowerCanineData$Species),hjust=0, vjust=0) +
+  labs(title="Residuals from PGLS log(Body mass (g)) vs. log(Length (Lower canines))", 
+       subtitle="",
+       x="",
+       y="Residual value") +
+     theme_classic() +
+     theme(legend.position = "none")
+
+LowerLength.BodyMass.Analysis <- grid.arrange(LowerRegression, LowerResiduals, nrow = 1)
+
+```
+
+```{r}
+### SIGNIFICANCE TESTING -----> DOES SHARPNESS (TIP OR EDGE) OR CANINE SHAPE (PC1 = ROBUSTICITY AND PC2 = CURVATURE) CORRELATE WITH DIET?
+
+### UPPERS
+### lm.rrpp PHYLOGENETIC ANOVAS FOR TIPS, EDGES, AND CANINE SHAPE 
+
+## SHARPNESS
+# TIPS
+diet.TipUpper <- lm.rrpp(UpperCanines.diet.finalData$Tip.Av.SpMean ~ UpperCanines.dietlabels$Diet, Cov = diet.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(diet.TipUpper)
+PWUpperTipDiet <- pairwise(diet.TipUpper, groups = UpperCanines.dietlabels$Diet)
+summary(PWUpperTipDiet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# ANT
+diet.AntUpper <- lm.rrpp(UpperCanines.diet.finalData$Anterior.SpMean ~ UpperCanines.dietlabels$Diet, Cov = diet.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(diet.AntUpper)
+PWUpperAntDiet <- pairwise(diet.AntUpper, groups = UpperCanines.dietlabels$Diet)
+summary(PWUpperAntDiet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# POS
+diet.PosUpper <- lm.rrpp(UpperCanines.diet.finalData$Posterior.SpMean ~ UpperCanines.dietlabels$Diet, Cov = diet.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(diet.PosUpper)
+PWUpperPosDiet <- pairwise(diet.PosUpper, groups = UpperCanines.dietlabels$Diet)
+summary(PWUpperPosDiet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# LIN
+diet.LinUpper <- lm.rrpp(UpperCanines.diet.finalData$Lingual.SpMean ~ UpperCanines.dietlabels$Diet, Cov = diet.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(diet.LinUpper)
+PWUpperLinDiet <- pairwise(diet.LinUpper, groups = UpperCanines.dietlabels$Diet)
+summary(PWUpperLinDiet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# LAB
+diet.LabUpper <- lm.rrpp(UpperCanines.diet.finalData$Labial.SpMean ~ UpperCanines.dietlabels$Diet, Cov = diet.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(diet.LabUpper)
+PWUpperLabDiet <- pairwise(diet.LabUpper, groups = UpperCanines.dietlabels$Diet)
+summary(PWUpperLabDiet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+##PC SCORES FROM 3DGM
+# PC1
+diet.PC1Upper <- lm.rrpp(UpperCanines.diet.finalData$GMSpM.PC1 ~ UpperCanines.dietlabels$Diet, Cov = diet.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(diet.PC1Upper)
+PWUpperPC1Diet <- pairwise(diet.PC1Upper, groups = UpperCanines.dietlabels$Diet)
+summary(PWUpperPC1Diet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# PC2
+diet.PC2Upper <- lm.rrpp(UpperCanines.diet.finalData$GMSpM.PC2 ~ UpperCanines.dietlabels$Diet, Cov = diet.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(diet.PC2Upper)
+PWUpperPC2Diet <- pairwise(diet.PC2Upper, groups = UpperCanines.dietlabels$Diet)
+summary(PWUpperPC2Diet, test.type = "dist", confidence = 0.95, stat.table = F)
+```
+
+```{r}
+### SIGNIFICANCE TESTING -----> DOES SHARPNESS (TIP OR EDGE) OR CANINE SHAPE (PC1 = ROBUSTICITY AND PC2 = CURVATURE) CORRELATE WITH DIET?
+### LOWERS
+### lm.rrpp PHYLOGENETIC ANOVAS FOR TIPS, EDGES, AND CANINE SHAPE 
+
+## SHARNESS
+# TIPS
+diet.TipLower <- lm.rrpp(LowerCanines.diet.finalData$Tip.Av.SpMean ~ LowerCanines.dietlabels$Diet, Cov = diet.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(diet.TipLower)
+PWLowerTipDiet <- pairwise(diet.TipLower, groups = LowerCanines.dietlabels$Diet)
+summary(PWLowerTipDiet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# ANT
+diet.AntLower <- lm.rrpp(LowerCanines.diet.finalData$Anterior.SpMean ~ LowerCanines.dietlabels$Diet, Cov = diet.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(diet.AntLower)
+PWLowerAntDiet <- pairwise(diet.AntLower, groups = LowerCanines.dietlabels$Diet)
+summary(PWLowerAntDiet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# POS
+diet.PosLower <- lm.rrpp(LowerCanines.diet.finalData$Posterior.SpMean ~ LowerCanines.dietlabels$Diet, Cov = diet.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(diet.PosLower)
+PWLowerPosDiet <- pairwise(diet.PosLower, groups = LowerCanines.dietlabels$Diet)
+summary(PWLowerPosDiet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# LIN
+diet.LinLower <- lm.rrpp(LowerCanines.diet.finalData$Lingual.SpMean ~ LowerCanines.dietlabels$Diet, Cov = diet.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(diet.LinLower)
+PWLowerLinDiet <- pairwise(diet.LinLower, groups = LowerCanines.dietlabels$Diet)
+summary(PWLowerLinDiet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# LAB
+diet.LabLower <- lm.rrpp(LowerCanines.diet.finalData$Labial.SpMean ~ LowerCanines.dietlabels$Diet, Cov = diet.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(diet.LabLower)
+PWLowerLabDiet <- pairwise(diet.LabLower, groups = LowerCanines.dietlabels$Diet)
+summary(PWLowerLabDiet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+##PC SCORES FROM 3DGM
+# PC1
+diet.PC1Lower <- lm.rrpp(LowerCanines.diet.finalData$GMSpM.PC1 ~ LowerCanines.dietlabels$Diet, Cov = diet.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(diet.PC1Lower)
+PWLowerPC1Diet <- pairwise(diet.PC1Lower, groups = LowerCanines.dietlabels$Diet)
+summary(PWLowerPC1Diet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# PC2
+diet.PC2Lower <- lm.rrpp(LowerCanines.diet.finalData$GMSpM.PC2 ~ LowerCanines.dietlabels$Diet, Cov = diet.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(diet.PC2Lower)
+PWLowerPC2Diet <- pairwise(diet.PC2Lower, groups = LowerCanines.dietlabels$Diet)
+summary(PWLowerPC2Diet, test.type = "dist", confidence = 0.95, stat.table = F)
+
+```
+
+```{r}
+### SIGNIFICANCE TESTING -----> DOES SHARPNESS (TIP OR EDGE) OR CANINE SHAPE (PC1 = ROBUSTICITY AND PC2 = CURVATURE) CORRELATE WITH KILLING?
+### UPPERS
+### lm.rrpp PHYLOGENETIC ANOVAS FOR TIPS, EDGES, AND CANINE SHAPE 
+
+## SHARPNESS
+# TIPS
+kill.TipUpper <- lm.rrpp(UpperCanines.kill.finalData$Tip.Av.SpMean ~ UpperCanines.killlabels$Killing.technique, Cov = kill.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(kill.TipUpper)
+PWUpperTipKill <- pairwise(kill.TipUpper, groups = UpperCanines.killlabels$Killing.technique)
+summary(PWUpperTipKill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# ANT
+kill.AntUpper <- lm.rrpp(UpperCanines.kill.finalData$Anterior.SpMean ~ UpperCanines.killlabels$Killing.technique, Cov = kill.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(kill.AntUpper)
+PWUpperAntKill <- pairwise(kill.AntUpper, groups = UpperCanines.killlabels$Killing.technique)
+summary(PWUpperAntKill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# POS
+kill.PosUpper <- lm.rrpp(UpperCanines.kill.finalData$Posterior.SpMean ~ UpperCanines.killlabels$Killing.technique, Cov = kill.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(kill.PosUpper)
+PWUpperPosKill <- pairwise(kill.PosUpper, groups = UpperCanines.killlabels$Killing.technique)
+summary(PWUpperPosKill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# LIN
+kill.LinUpper <- lm.rrpp(UpperCanines.kill.finalData$Lingual.SpMean ~ UpperCanines.killlabels$Killing.technique, Cov = kill.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(kill.LinUpper)
+PWUpperLinKill <- pairwise(kill.LinUpper, groups = UpperCanines.killlabels$Killing.technique)
+summary(PWUpperLinKill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# LAB
+kill.LabUpper <- lm.rrpp(UpperCanines.kill.finalData$Labial.SpMean ~ UpperCanines.killlabels$Killing.technique, Cov = kill.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(kill.LabUpper)
+PWUpperLabKill <- pairwise(kill.LabUpper, groups = UpperCanines.killlabels$Killing.technique)
+summary(PWUpperLabKill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+## PC SCORES FROM 3DGM
+# PC1
+kill.PC1Upper <- lm.rrpp(UpperCanines.kill.finalData$GMSpM.PC1 ~ UpperCanines.killlabels$Killing.technique, Cov = kill.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(kill.PC1Upper)
+PWUpperPC1Kill <- pairwise(kill.PC1Upper, groups = UpperCanines.killlabels$Killing.technique)
+summary(PWUpperPC1Kill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# PC2
+kill.PC2Upper <- lm.rrpp(UpperCanines.kill.finalData$GMSpM.PC2 ~ UpperCanines.killlabels$Killing.technique, Cov = kill.UpperCov, SS.type = "I", print.progress = FALSE)
+summary(kill.PC2Upper)
+PWUpperPC2Kill <- pairwise(kill.PC2Upper, groups = UpperCanines.killlabels$Killing.technique)
+summary(PWUpperPC2Kill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+```
+
+```{r}
+### SIGNIFICANCE TESTING -----> DOES SHARPNESS (TIP OR EDGE) OR CANINE SHAPE (PC1 = ROBUSTICITY AND PC2 = CURVATURE) CORRELATE WITH DIET?
+### LOWERS
+### lm.rrpp PHYLOGENETIC ANOVAS FOR TIPS, EDGES, AND CANINE SHAPE 
+
+## SHARPNESS
+# TIPS
+kill.TipLower <- lm.rrpp(LowerCanines.kill.finalData$Tip.Av.SpMean ~ LowerCanines.killlabels$Killing.technique, Cov = kill.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(kill.TipLower)
+PWLowerTipKill <- pairwise(kill.TipLower, groups = LowerCanines.killlabels$Killing.technique)
+summary(PWLowerTipKill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# ANT
+kill.AntLower <- lm.rrpp(LowerCanines.kill.finalData$Anterior.SpMean ~ LowerCanines.killlabels$Killing.technique, Cov = kill.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(kill.AntLower)
+PWLowerAntKill <- pairwise(kill.AntLower, groups = LowerCanines.killlabels$Killing.technique)
+summary(PWLowerAntKill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# POS
+kill.PosLower <- lm.rrpp(LowerCanines.kill.finalData$Posterior.SpMean ~ LowerCanines.killlabels$Killing.technique, Cov = kill.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(kill.PosLower)
+PWLowerPosKill <- pairwise(kill.PosLower, groups = LowerCanines.killlabels$Killing.technique)
+summary(PWLowerPosKill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# LIN
+kill.LinLower <- lm.rrpp(LowerCanines.kill.finalData$Lingual.SpMean ~ LowerCanines.killlabels$Killing.technique, Cov = kill.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(kill.LinLower)
+PWLowerLinKill <- pairwise(kill.LinLower, groups = LowerCanines.killlabels$Killing.technique)
+summary(PWLowerLinKill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# LAB
+kill.LabLower <- lm.rrpp(LowerCanines.kill.finalData$Labial.SpMean ~ LowerCanines.killlabels$Killing.technique, Cov = kill.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(kill.LabLower)
+PWLowerLabKill <- pairwise(kill.LabLower, groups = LowerCanines.killlabels$Killing.technique)
+summary(PWLowerLabKill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+## PC SCORES FROM 3DGM
+# PC1
+kill.PC1Lower <- lm.rrpp(LowerCanines.kill.finalData$GMSpM.PC1 ~ LowerCanines.killlabels$Killing.technique, Cov = kill.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(kill.PC1Lower)
+PWLowerPC1Kill <- pairwise(kill.PC1Lower, groups = LowerCanines.killlabels$Killing.technique)
+summary(PWLowerPC1Kill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+# PC2
+kill.PC2Lower <- lm.rrpp(LowerCanines.kill.finalData$GMSpM.PC2 ~ LowerCanines.killlabels$Killing.technique, Cov = kill.LowerCov, SS.type = "I", print.progress = FALSE)
+summary(kill.PC2Lower)
+PWLowerPC2Kill <- pairwise(kill.PC2Lower, groups = LowerCanines.killlabels$Killing.technique)
+summary(PWLowerPC2Kill, test.type = "dist", confidence = 0.95, stat.table = F)
+
+```
+
+```{r}
+#### TRIMMING TREE PAIRED CANINES
+## IMPORT SUBSETTED FILE
+PairedCanines <- read.csv(file = "PairedCanines.csv", header=TRUE, row.names=1, stringsAsFactors = F)
+
+## TREE ----> 
+# matches dataframe species to phylogeny
+PairedCanines.plusTree <- treedata(NewTree, PairedCanines) 
+# adds back in phy
+PairedCanines.finalTree <- PairedCanines.plusTree$phy
+# makes a new dataframe
+PairedCanines.finalData <- data.frame(PairedCanines.plusTree$data)
+
+## RELABELLING
+# relabeling terms so we can differentiate better
+Upper.Length<- PairedCanines.finalData$logUpperMidline
+Lower.Length<- PairedCanines.finalData$logLowerMidline
+Upper.PC1<- PairedCanines.finalData$PC1.Upper
+Lower.PC1<- PairedCanines.finalData$PC1.Lower
+Upper.PC2<- PairedCanines.finalData$PC2.Upper
+Lower.PC2<- PairedCanines.finalData$PC2.Lower
+PC1diff<- PairedCanines.finalData$PC1diff
+PC2diff<- PairedCanines.finalData$PC2diff
+
+# relabeling
+names(Upper.Length)<-row.names(PairedCanines.finalData)
+names(Lower.Length)<-row.names(PairedCanines.finalData)
+names(Upper.PC1)<-row.names(PairedCanines.finalData)
+names(Lower.PC1)<-row.names(PairedCanines.finalData)
+names(Upper.PC2)<-row.names(PairedCanines.finalData)
+names(Lower.PC2)<-row.names(PairedCanines.finalData)
+names(PC1diff)<-row.names(PairedCanines.finalData)
+names(PC2diff)<-row.names(PairedCanines.finalData)
+
+```
+
+
+
+```{r}
+### PC DIFFERENCES B/W UPPERS & LOWERS - NOT SPECIES MEANS BUT UPPER AND LOWER CANINES FROM THE SAME INDIVIDUAL WHICH ARE PAIRED
+
+## SETTING UP THE NEW DATAFRAME
+
+labels <- read.csv('Master.Data.csv')
+
+labeloutliers <- subset(labels, subset = labels$Outlier == 'Y')
+
+# ADDING IN ADDITIONAL COLUMNS FROM OTHER DATASET (PC values from 3DGM)
+can.slide.pcs$Tooth <- labeloutliers$Tooth
+can.slide.pcs$Specimen <- labeloutliers$Specimen
+can.slide.pcs$Family <- labeloutliers$Family
+can.slide.pcs$Species <- labeloutliers$Species
+can.slide.pcs$Diet <- labeloutliers$Diet
+can.slide.pcs$Killing <- labeloutliers$Killing
+can.slide.pcs$Sharpness.pair <- labeloutliers$Sharpness.pair
+
+## SUBSETTING OUT CANINE PAIRS
+paired.pcs <- subset(can.slide.pcs, subset = can.slide.pcs$Sharpness.pair == 'Y')
+
+# CLEANING AND ORGINISING ----> SO WE ARE ABLE TO MANIPULATE THE DATAFRAME TO CALCULATE THE DIFFERENCES IN PC SCORE BETWEEN UPPER AND LOWER CANINES
+NoRowsBC <- nrow(paired.pcs)
+paired.pcs$PC1A <- c(NA,(paired.pcs$Comp1[1:(NoRowsBC-1)]))
+paired.pcs$PC1Diff <- paired.pcs$Comp1 - paired.pcs$PC1A
+paired.pcs$PC2A <- c(NA,(paired.pcs$Comp2[1:(NoRowsBC-1)]))
+paired.pcs$PC2Diff <- paired.pcs$Comp2 - paired.pcs$PC2A
+
+# BECASUE WE SHIFTED THE DATA DOWN AND TO THE RIGHT WE HAVE TO REMOVE EVERY SECOND ROW, IN THIS CASE IT JUST MEANS SUBSETTING
+paired.pcs_Diff <- subset(paired.pcs,subset=paired.pcs$Tooth=='Upper')
+
+# WRITE THIS TO A NEW EXCEL DATAFRAME, SOME EDITING REQUIRED TO REMOVED MULTIPLES 
+#write.csv(paired.pcs_Diff, "PairedCanines.PCDiffs.csv")
+
+# IMPORT IN NEW EDITED DATAFRAME
+paired.pcs_Diff <- read.csv('PairedCanines.PCDiffs.csv')
+
+# Plotting a two axis graph SHOWING VALUES FOR DIFFERENCE IN PC1 (ROBUSTICITY) AND PC2 (CURVATURE) WITH FAMILY COLOURS
+GMPCsDiffFamily <- ggplot(paired.pcs_Diff,
+     aes(x = PC1Diff, y = PC2Diff, group = factor(paired.pcs_Diff$Species))) +
+geom_point(size=3, aes(colour = paired.pcs_Diff$Family, shape = paired.pcs_Diff$Tooth)) +
+geom_text(size=2, aes(label = paired.pcs_Diff$Species), hjust=-.2, vjust=.4) +
+scale_colour_manual(name = "Family", values = FamilyColours) +
+scale_shape_manual(name = "Tooth", values = Shapes) +
+labs(title = "3DGM and PC differences") +
+   theme_classic() +
+   theme(legend.position = "none")
+
+GMPCsDiffFamily
+
+```
+
+```{r}
+### PlOTTING REGRESSION OF UPPERS VS. LOWERS LENGTH IN CANINE PAIRS AND ALSO PERFORMING PGLS TO LOOK AT THE RELATIONSHIP BETWEEN THEM
+
+### IMPORT DATA ---> file with both the upper and lower midline lengths for each canine pair set
+BothPair <- read.csv('PairedCaninesData.csv')
+BothPair
+
+### NORMAL REGRSSION OF LOG-LOG DATA
+logLengthRegression <- lm(logLowerMidline ~ logUpperMidline, data = BothPair)
+plot(BothPair$logUpperMidline, BothPair$logLowerMidline)
+abline(logLengthRegression)
+summary(logLengthRegression)
+
+### GRAPH OF REGRESSION  
+PairedCanineslogDiffFamily <- ggplot(BothPair,
+     aes(x = logUpperMidline, y = logLowerMidline)) +
+     geom_abline(intercept = 0, slope = 1, colour = 'blue') +
+     geom_smooth(method = lm, colour = 'red') +
+     geom_point(size=3, aes(colour = BothPair$Family)) +
+     scale_colour_manual(name = "Family", values = FamilyColours) +
+     geom_text(size=2, aes(label = BothPair$Species), hjust=-.2, vjust=.4) +
+     labs(title = "log(Canine length)",
+            x = "log(Upper midline length (mm))",
+            y = "log(Lower midline length (mm))") +
+     theme_classic() +
+   theme(legend.position = "none")
+
+PairedCanineslogDiffFamily
+
+### PGLS on PAIRED DATA SET
+## GLS
+PairedLength <- gls(logLowerMidline ~ logUpperMidline, correlation = corBrownian(phy = PairedCanines.finalTree), data = PairedCanines.finalData, method = "ML")
+summary(PairedLength)
+
+## LM.RRPP ----> need vcv
+PairedCOV <- vcv(PairedCanines.finalTree)
+# lm.rrpp
+logLengthPaired <- lm.rrpp(PairedCanines.finalData$logLowerMidline ~ PairedCanines.finalData$logUpperMidline, Cov = PairedCOV, SS.type = "I", print.progress = FALSE)
+summary(logLengthPaired)
+
+```
+
+```{r}
+### SIGNIFICANCE TESTING
+## DOING A PAIRED T-TEST ON THE CANINE TOOTH LENGTH AND logLENGTH --------> are the upper and lower canine tooth lengths and loglengths significantly different from one another
+
+# DATA
+BothPair
+
+### T-TEST
+## DIFF IN LENGTH
+t.test(BothPair$UpperMidline, BothPair$LowerMidline, paired = T, conf.level = 0.95)
+## DIFF IN logLENGTH
+t.test(BothPair$logUpperMidline, BothPair$logLowerMidline, paired = T, conf.level = 0.95)
+
+### DOING A PAIRED T-TEST ON THE CANINE TOOTH TIP SHARPNESS --------> are the upper and lower canine tooth tips significantly different from one another?
+
+## DIFF IN TIP SHARPNESS
+t.test(BothPair$UpperTip, BothPair$LowerTip, paired = T, conf.level = 0.95)
+
+### DOING A PAIRED T-TEST ON THE PC SCORES --------> are the upper and lower pc scores significantly different from one another?
+
+### T-TEST
+## DIFF IN PC1 - robustness
+t.test(BothPair$PC1Upper, BothPair$PC1Lower, paired = T, conf.level = 0.95)
+## This means that upper canine teeth are significantly less robust than lower canine teeth
+
+## DIFF IN PC2 - curvature
+t.test(BothPair$PC2Upper, BothPair$PC2Lower, paired = T, conf.level = 0.95)
+## This means that upper canine teeth are significantly less curved than lower caine teeth
+
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### UPPER CANINES
+
+# IMPORT DATA
+UpperCanines <- read.csv("UpperCanines.graphdata.csv")
+
+### SHARPNESS
+# TIP SHARPNESS WITH FAMILY COLOURS
+Uppers.TipSharp.Family <- ggplot(UpperCanines, aes(x = UpperCanines$Family, y = UpperCanines$Tip.Av)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+   coord_cartesian(ylim = c(12,18)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine tip sharpness", 
+       subtitle="",
+       x="Family",
+       y="Tip sharpness") +
+     theme(legend.position = "none")
+# TIP SHARPNESS WITH DIET COLOURS
+Uppers.TipSharp.Diet <- ggplot(UpperCanines, aes(x = UpperCanines$Diet, y = UpperCanines$Tip.Av)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+  coord_cartesian(ylim = c(12,18)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine tip sharpness", 
+       subtitle="",
+       x="Diet",
+       y="Tip sharpness") +
+     theme(legend.position = "none")
+# TIP SHARPNESS WITH KILLING COLOURS
+Uppers.TipSharp.Kill <- ggplot(UpperCanines, aes(x = UpperCanines$Killing, y = UpperCanines$Tip.Av)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+  coord_cartesian(ylim = c(12,18)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine tip sharpness", 
+       subtitle="",
+       x="Killing technique",
+       y="Tip sharpness") +
+     theme(legend.position = "none")
+
+
+Uppers.TipSharp.Family
+Uppers.TipSharp.Diet
+Uppers.TipSharp.Kill
+UppersTipSharp <- grid.arrange(Uppers.TipSharp.Family, Uppers.TipSharp.Diet, Uppers.TipSharp.Kill, nrow = 1)
+
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### UPPER CANINES
+### SHARPNESS
+
+# ANTERIOR WITH FAMILY COLOURS
+Uppers.AntSharp.Family <-ggplot(UpperCanines, aes(x = UpperCanines$Family, y = UpperCanines$Anterior)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+  coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine anterior sharpness", 
+       subtitle="",
+       x="Family",
+       y="Anterior sharpness") +
+     theme(legend.position = "none")
+# ANTERIOR WITH DIET COLOURS
+Uppers.AntSharp.Diet <-ggplot(UpperCanines, aes(x = UpperCanines$Diet, y = UpperCanines$Anterior)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+    coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine anterior sharpness", 
+       subtitle="",
+       x="Diet",
+       y="Anterior sharpness") +
+     theme(legend.position = "none")
+# ANTERIOR WITH KILLING COLOURS
+Uppers.AntSharp.Kill <-ggplot(UpperCanines, aes(x = UpperCanines$Killing, y = UpperCanines$Anterior)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+    coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine anterior sharpness", 
+       subtitle="",
+       x="Killing technique",
+       y="Anterior sharpness") +
+     theme(legend.position = "none")
+
+Uppers.AntSharp.Family
+Uppers.AntSharp.Diet
+Uppers.AntSharp.Kill
+UppersAntSharp <- grid.arrange(Uppers.AntSharp.Family, Uppers.AntSharp.Diet, Uppers.AntSharp.Kill, nrow = 1)
+```
+
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### UPPER CANINES
+### SHARPNESS
+
+# POSTERIOR WITH FAMILY COLOURS
+Uppers.PosSharp.Family <-ggplot(UpperCanines, aes(x = UpperCanines$Family, y = UpperCanines$Posterior)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+    coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine posterior sharpness", 
+       subtitle="",
+       x="Family",
+       y="Posterior sharpness") +
+     theme(legend.position = "none")
+# POSTERIOR WITH DIET COLOURS
+Uppers.PosSharp.Diet <-ggplot(UpperCanines, aes(x = UpperCanines$Diet, y = UpperCanines$Posterior)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+  coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine posterior sharpness", 
+       subtitle="",
+       x="Diet",
+       y="Posterior sharpness") +
+     theme(legend.position = "none")
+# POSTERIOR WITH KILLING COLOURS
+Uppers.PosSharp.Kill <-ggplot(UpperCanines, aes(x = UpperCanines$Killing, y = UpperCanines$Posterior)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+  coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine posterior sharpness", 
+       subtitle="",
+       x="Killing technique",
+       y="Posterior sharpness") +
+     theme(legend.position = "none")
+
+Uppers.PosSharp.Family
+Uppers.PosSharp.Diet
+Uppers.PosSharp.Kill
+UppersPosSharp <- grid.arrange(Uppers.PosSharp.Family, Uppers.PosSharp.Diet, Uppers.PosSharp.Kill, nrow = 1)
+
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### UPPER CANINES
+### SHARPNESS
+
+# LINGUAL WITH FAMILY COLOURS
+Uppers.LinSharp.Family <-ggplot(UpperCanines, aes(x = UpperCanines$Family, y = UpperCanines$Lingual)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine lingual sharpness", 
+       subtitle="",
+       x="Family",
+       y="Lingual sharpness") +
+     theme(legend.position = "none")
+# LINGUAL WITH DIET COLOURS
+Uppers.LinSharp.Diet <-ggplot(UpperCanines, aes(x = UpperCanines$Diet, y = UpperCanines$Lingual)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine lingual sharpness", 
+       subtitle="",
+       x="Diet",
+       y="Lingual sharpness") +
+     theme(legend.position = "none")
+# LINGUAL WITH KILLING COLOURS
+Uppers.LinSharp.Kill <-ggplot(UpperCanines, aes(x = UpperCanines$Killing, y = UpperCanines$Lingual)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine lingual sharpness", 
+       subtitle="",
+       x="Killing technique",
+       y="Lingual sharpness") +
+     theme(legend.position = "none")
+
+Uppers.LinSharp.Family
+Uppers.LinSharp.Diet
+Uppers.LinSharp.Kill
+UppersLinSharp <- grid.arrange(Uppers.LinSharp.Family, Uppers.LinSharp.Diet, Uppers.LinSharp.Kill, nrow = 1)
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### UPPER CANINES
+### SHARPNESS
+
+# LABIAL WITH FAMILY COLOURS
+Uppers.LabSharp.Family <-ggplot(UpperCanines, aes(x = UpperCanines$Family, y = UpperCanines$Labial)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine labial sharpness", 
+       subtitle="",
+       x="Family",
+       y="Labial sharpness") +
+     theme(legend.position = "none")
+# LABIAL WITH DIET COLOURS
+Uppers.LabSharp.Diet <-ggplot(UpperCanines, aes(x = UpperCanines$Diet, y = UpperCanines$Labial)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine labial sharpness", 
+       subtitle="",
+       x="Diet",
+       y="Labial sharpness") +
+     theme(legend.position = "none")
+# LABIAL WITH KILLING COLOURS
+Uppers.LabSharp.Kill <-ggplot(UpperCanines, aes(x = UpperCanines$Killing, y = UpperCanines$Labial)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine labial sharpness", 
+       subtitle="",
+       x="Killing technique",
+       y="Labial sharpness") +
+     theme(legend.position = "none")
+
+Uppers.LabSharp.Family
+Uppers.LabSharp.Diet
+Uppers.LabSharp.Kill
+UppersLabSharp <- grid.arrange(Uppers.LabSharp.Family, Uppers.LabSharp.Diet, Uppers.LabSharp.Kill, nrow = 1)
+
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### UPPER CANINES
+### PC SCORES
+
+# PC1 WITH FAMILY COLOURS
+Uppers.PC1.Family <-ggplot(UpperCanines, aes(x = UpperCanines$Family, y = UpperCanines$PC1)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine PC1", 
+       subtitle="",
+       x="Family",
+       y="Robusticity correlate (PC1)") +
+     theme(legend.position = "none")
+# PC1 WITH DIET COLOURS
+Uppers.PC1.Diet <-ggplot(UpperCanines, aes(x = UpperCanines$Diet, y = UpperCanines$PC1)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine PC1", 
+       subtitle="",
+       x="Diet",
+       y="Robusticity correlate (PC1)") +
+     theme(legend.position = "none")
+# PC1 WITH KILLING COLOURS
+Uppers.PC1.Kill <-ggplot(UpperCanines, aes(x = UpperCanines$Killing, y = UpperCanines$PC1)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine PC1", 
+       subtitle="",
+       x="Killing technique",
+       y="Robusticity correlate (PC1)") +
+     theme(legend.position = "none")
+
+Uppers.PC1.Family
+Uppers.PC1.Diet
+Uppers.PC1.Kill
+UppersPC1 <- grid.arrange(Uppers.PC1.Family, Uppers.PC1.Diet, Uppers.PC1.Kill, nrow = 1)
+
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### UPPER CANINES
+### PC SCORES
+
+# PC2 WITH FAMILY COLOURS
+Uppers.PC2.Family <-ggplot(UpperCanines, aes(x = UpperCanines$Family, y = UpperCanines$PC2)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine PC2", 
+       subtitle="",
+       x="Family",
+       y="Curvature correlate (PC2)") +
+     theme(legend.position = "none")
+# PC2 WITH DIET COLOURS
+Uppers.PC2.Diet <-ggplot(UpperCanines, aes(x = UpperCanines$Diet, y = UpperCanines$PC2)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine PC2", 
+       subtitle="",
+       x="Diet",
+       y="Curvature correlate (PC2)") +
+     theme(legend.position = "none")
+# PC2 WITH KILLING COLOURS
+Uppers.PC2.Kill <-ggplot(UpperCanines, aes(x = UpperCanines$Killing, y = UpperCanines$PC2)) +
+   geom_boxplot(aes(fill = factor(UpperCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Upper canine PC2", 
+       subtitle="",
+       x="Killing technique",
+       y="Curvature correlate (PC2)") +
+     theme(legend.position = "none")
+
+Uppers.PC2.Family
+Uppers.PC2.Diet
+Uppers.PC2.Kill
+UppersPC2 <- grid.arrange(Uppers.PC2.Family, Uppers.PC2.Diet, Uppers.PC2.Kill, nrow = 1)
+
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### LOWER CANINES
+### SHARPNESS
+
+# IMPORT DATA
+LowerCanines <- read.csv("LowerCanines.graphdata.csv")
+
+# TIP SHARPNESS WITH FAMILY COLOURS
+Lowers.TipSharp.Family <-ggplot(LowerCanines, aes(x = LowerCanines$Family, y = LowerCanines$Tip.Av)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+   coord_cartesian(ylim = c(12,18)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine tip sharpness", 
+       subtitle="",
+       x="Family",
+       y="Tip sharpness") +
+     theme(legend.position = "none")
+# TIP SHARPNESS WITH DIET COLOURS
+Lowers.TipSharp.Diet <-ggplot(LowerCanines, aes(x = LowerCanines$Diet, y = LowerCanines$Tip.Av)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+   coord_cartesian(ylim = c(12,18)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine tip sharpness", 
+       subtitle="",
+       x="Diet",
+       y="Tip sharpness") +
+     theme(legend.position = "none")
+# TIP SHARPNESS WITH KILLING COLOURS
+Lowers.TipSharp.Kill <-ggplot(LowerCanines, aes(x = LowerCanines$Killing, y = LowerCanines$Tip.Av)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+   coord_cartesian(ylim = c(12,18)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine tip sharpness", 
+       subtitle="",
+       x="Killing technique",
+       y="Tip sharpness") +
+     theme(legend.position = "none")
+
+
+Lowers.TipSharp.Family
+Lowers.TipSharp.Diet
+Lowers.TipSharp.Kill
+
+LowersTipSharp <- grid.arrange(Lowers.TipSharp.Family, Lowers.TipSharp.Diet, Lowers.TipSharp.Kill, nrow = 1)
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### LOWER CANINES
+### SHARPNESS
+
+# ANTERIOR WITH FAMILY COLOURS
+Lowers.AntSharp.Family <-ggplot(LowerCanines, aes(x = LowerCanines$Family, y = LowerCanines$Anterior)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine anterior sharpness", 
+       subtitle="",
+       x="Family",
+       y="Anterior sharpness") +
+     theme(legend.position = "none")
+# ANTERIOR WITH DIET COLOURS
+Lowers.AntSharp.Diet <-ggplot(LowerCanines, aes(x = LowerCanines$Diet, y = LowerCanines$Anterior)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine anterior sharpness", 
+       subtitle="",
+       x="Diet",
+       y="Anterior sharpness") +
+     theme(legend.position = "none")
+# ANTERIOR WITH KILLING COLOURS
+Lowers.AntSharp.Kill <-ggplot(LowerCanines, aes(x = LowerCanines$Killing, y = LowerCanines$Anterior)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine anterior sharpness", 
+       subtitle="",
+       x="Killing technique",
+       y="Anterior sharpness") +
+     theme(legend.position = "none")
+
+Lowers.AntSharp.Family
+Lowers.AntSharp.Diet
+Lowers.AntSharp.Kill
+
+LowersAntSharp <- grid.arrange(Lowers.AntSharp.Family, Lowers.AntSharp.Diet, Lowers.AntSharp.Kill, nrow = 1)
+
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### LOWER CANINES
+### SHARPNESS
+
+# POSTERIOR WITH FAMILY COLOURS
+Lowers.PosSharp.Family <-ggplot(LowerCanines, aes(x = LowerCanines$Family, y = LowerCanines$Posterior)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine posterior sharpness", 
+       subtitle="",
+       x="Family",
+       y="Posterior aharpness") +
+     theme(legend.position = "none")
+# POSTERIOR WITH DIET COLOURS
+Lowers.PosSharp.Diet <-ggplot(LowerCanines, aes(x = LowerCanines$Diet, y = LowerCanines$Posterior)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine posterior sharpness", 
+       subtitle="",
+       x="Diet",
+       y="Posterior sharpness") +
+     theme(legend.position = "none")
+# POSTERIOR WITH KILLING COLOURS
+Lowers.PosSharp.Kill <-ggplot(LowerCanines, aes(x = LowerCanines$Killing, y = LowerCanines$Posterior)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine posterior sharpness", 
+       subtitle="",
+       x="Killing technique",
+       y="Posterior sharpness") +
+     theme(legend.position = "none")
+
+Lowers.PosSharp.Family
+Lowers.PosSharp.Diet
+Lowers.PosSharp.Kill
+
+LowersPosSharp <- grid.arrange(Lowers.PosSharp.Family, Lowers.PosSharp.Diet, Lowers.PosSharp.Kill, nrow = 1)
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### LOWER CANINES
+### SHARPNESS
+
+# LINGUAL WITH FAMILY COLOURS
+Lowers.LinSharp.Family <-ggplot(LowerCanines, aes(x = LowerCanines$Family, y = LowerCanines$Lingual)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine lingual sharpness", 
+       subtitle="",
+       x="Family",
+       y="Lingual aharpness") +
+     theme(legend.position = "none")
+# LINGUAL WITH DIET COLOURS
+Lowers.LinSharp.Diet <-ggplot(LowerCanines, aes(x = LowerCanines$Diet, y = LowerCanines$Lingual)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine lingual sharpnesss", 
+       subtitle="",
+       x="Diet",
+       y="Lingual sharpness") +
+     theme(legend.position = "none")
+# LINGUAL WITH KILLING COLOURS
+Lowers.LinSharp.Kill <-ggplot(LowerCanines, aes(x = LowerCanines$Killing, y = LowerCanines$Lingual)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine lingual sharpness", 
+       subtitle="",
+       x="Killing technique",
+       y="Lingual sharpness") +
+     theme(legend.position = "none")
+
+Lowers.LinSharp.Family
+Lowers.LinSharp.Diet
+Lowers.LinSharp.Kill
+
+LowersLinSharp <- grid.arrange(Lowers.LinSharp.Family, Lowers.LinSharp.Diet, Lowers.LinSharp.Kill, nrow = 1)
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### LOWER CANINES
+### SHARPNESS
+
+# LABIAL WITH FAMILY COLOURS
+Lowers.LabSharp.Family <-ggplot(LowerCanines, aes(x = LowerCanines$Family, y = LowerCanines$Labial)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine labial sharpness", 
+       subtitle="",
+       x="Family",
+       y="Labial aharpness") +
+     theme(legend.position = "none")
+# LABIAL WITH DIET COLOURS
+Lowers.LabSharp.Diet <-ggplot(LowerCanines, aes(x = LowerCanines$Diet, y = LowerCanines$Labial)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine labial sharpness", 
+       subtitle="",
+       x="Diet",
+       y="Labial sharpness") +
+     theme(legend.position = "none")
+# LABIAL WITH KILLING COLOURS
+Lowers.LabSharp.Kill <-ggplot(LowerCanines, aes(x = LowerCanines$Killing, y = LowerCanines$Labial)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+   coord_cartesian(ylim = c(12,25)) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine labial sharpness", 
+       subtitle="",
+       x="Killing technique",
+       y="Labial sharpness") +
+     theme(legend.position = "none")
+
+Lowers.LabSharp.Family
+Lowers.LabSharp.Diet
+Lowers.LabSharp.Kill
+
+LowersLabSharp <- grid.arrange(Lowers.LabSharp.Family, Lowers.LabSharp.Diet, Lowers.LabSharp.Kill, nrow = 1)
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### LOWER CANINES
+### PC SCORES
+
+# PC1 WITH FAMILY COLOURS
+Lowers.PC1.Family <-ggplot(LowerCanines, aes(x = LowerCanines$Family, y = LowerCanines$PC1)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine PC1", 
+       subtitle="",
+       x="Family",
+       y="Robusticity correlate (PC1)") +
+     theme(legend.position = "none")
+# PC1 WITH DIET COLOURS
+Lowers.PC1.Diet <-ggplot(LowerCanines, aes(x = LowerCanines$Diet, y = LowerCanines$PC1)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine PC1", 
+       subtitle="",
+       x="Diet",
+       y="Robusticity correlate (PC1)") +
+     theme(legend.position = "none")
+# PC1 WITH KILLING COLOURS
+Lowers.PC1.Kill <-ggplot(LowerCanines, aes(x = LowerCanines$Killing, y = LowerCanines$PC1)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine PC1", 
+       subtitle="",
+       x="Killing technique",
+       y="Robusticity correlate (PC1)") +
+     theme(legend.position = "none")
+
+Lowers.PC1.Family
+Lowers.PC1.Diet
+Lowers.PC1.Kill
+LowersPC1 <- grid.arrange(Lowers.PC1.Family, Lowers.PC1.Diet, Lowers.PC1.Kill, nrow = 1)
+
+```
+
+```{r}
+#### GRAPHING CANINE SHAPE AND SHARPNESS
+### LOWER CANINES
+### PC SCORES
+
+# PC2 WITH FAMILY COLOURS
+Lowers.PC2.Family <-ggplot(LowerCanines, aes(x = LowerCanines$Family, y = LowerCanines$PC2)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Family))) +
+   scale_fill_manual(name = "Family", values = FamilyColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine PC2", 
+       subtitle="",
+       x="Family",
+       y="Robusticity correlate (PC2)") +
+     theme(legend.position = "none")
+# PC2 WITH DIET COLOURS
+Lowers.PC2.Diet <-ggplot(LowerCanines, aes(x = LowerCanines$Diet, y = LowerCanines$PC2)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Diet))) +
+   scale_fill_manual(name = "Family", values = DietColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine PC2", 
+       subtitle="",
+       x="Diet",
+       y="Robusticity correlate (PC2)") +
+     theme(legend.position = "none")
+# PC2 WITH KILLING COLOURS
+Lowers.PC2.Kill <-ggplot(LowerCanines, aes(x = LowerCanines$Killing, y = LowerCanines$PC2)) +
+   geom_boxplot(aes(fill = factor(LowerCanines$Killing))) +
+   scale_fill_manual(name = "Family", values = KillColours) +
+ theme_classic() +
+   theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+   labs(title="Lower canine PC2", 
+       subtitle="",
+       x="Killing technique",
+       y="Robusticity correlate (PC2)") +
+     theme(legend.position = "none")
+
+Lowers.PC2.Family
+Lowers.PC2.Diet
+Lowers.PC2.Kill
+LowersPC2 <- grid.arrange(Lowers.PC2.Family, Lowers.PC2.Diet, Lowers.PC2.Kill, nrow = 1)
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
